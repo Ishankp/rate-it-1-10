@@ -1,24 +1,15 @@
 import { Hono } from 'hono';
-import { context, redis, reddit } from '@devvit/web/server';
-import type {
-  DecrementResponse,
-  IncrementResponse,
-  InitResponse,
-} from '../../shared/api';
-
-type ErrorResponse = {
-  status: 'error';
-  message: string;
-};
+import { context, reddit } from '@devvit/web/server';
+import type { ApiErrorResponse, PollResponse, PollVoteResponse, PollScore } from '../../shared/api';
+import { getPollState, submitPollVote } from '../core/poll';
 
 export const api = new Hono();
 
-api.get('/init', async (c) => {
+api.get('/poll', async (c) => {
   const { postId } = context;
 
   if (!postId) {
-    console.error('API Init Error: postId not found in devvit context');
-    return c.json<ErrorResponse>(
+    return c.json<ApiErrorResponse>(
       {
         status: 'error',
         message: 'postId is required but missing from context',
@@ -28,34 +19,42 @@ api.get('/init', async (c) => {
   }
 
   try {
-    const [count, username] = await Promise.all([
-      redis.get('count'),
-      reddit.getCurrentUsername(),
-    ]);
+    const username = (await reddit.getCurrentUsername()) ?? null;
+    const state = await getPollState(postId, username);
 
-    return c.json<InitResponse>({
-      type: 'init',
-      postId: postId,
-      count: count ? parseInt(count) : 0,
-      username: username ?? 'anonymous',
+    if (!state) {
+      return c.json<ApiErrorResponse>(
+        {
+          status: 'error',
+          message: 'Poll not found',
+        },
+        404
+      );
+    }
+
+    return c.json<PollResponse>({
+      type: 'poll',
+      state,
     });
   } catch (error) {
-    console.error(`API Init Error for post ${postId}:`, error);
-    let errorMessage = 'Unknown error during initialization';
+    let errorMessage = 'Unknown error while loading the poll';
+
     if (error instanceof Error) {
-      errorMessage = `Initialization failed: ${error.message}`;
+      errorMessage = `Loading failed: ${error.message}`;
     }
-    return c.json<ErrorResponse>(
+
+    return c.json<ApiErrorResponse>(
       { status: 'error', message: errorMessage },
       400
     );
   }
 });
 
-api.post('/increment', async (c) => {
+api.post('/vote', async (c) => {
   const { postId } = context;
+
   if (!postId) {
-    return c.json<ErrorResponse>(
+    return c.json<ApiErrorResponse>(
       {
         status: 'error',
         message: 'postId is required',
@@ -64,30 +63,37 @@ api.post('/increment', async (c) => {
     );
   }
 
-  const count = await redis.incrBy('count', 1);
-  return c.json<IncrementResponse>({
-    count,
-    postId,
-    type: 'increment',
-  });
-});
+  const username = (await reddit.getCurrentUsername()) ?? null;
 
-api.post('/decrement', async (c) => {
-  const { postId } = context;
-  if (!postId) {
-    return c.json<ErrorResponse>(
+  if (!username) {
+    return c.json<ApiErrorResponse>(
       {
         status: 'error',
-        message: 'postId is required',
+        message: 'You need to be logged in to vote',
+      },
+      401
+    );
+  }
+
+  try {
+    const body = await c.req.json<{ score: number }>();
+    const score = Number(body.score) as PollScore;
+    const state = await submitPollVote(postId, username, score);
+
+    return c.json<PollVoteResponse>({
+      type: 'vote',
+      message: 'Vote recorded',
+      state,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to record vote';
+
+    return c.json<ApiErrorResponse>(
+      {
+        status: 'error',
+        message,
       },
       400
     );
   }
-
-  const count = await redis.incrBy('count', -1);
-  return c.json<DecrementResponse>({
-    count,
-    postId,
-    type: 'decrement',
-  });
 });

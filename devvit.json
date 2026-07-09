@@ -20,26 +20,27 @@
   "menu": {
     "items": [
       {
-        "label": "Create a new post",
-        "description": "rate-it-1-10",
+        "label": "Create 1-10 poll",
+        "description": "Create a timed opinion scale poll",
         "location": "subreddit",
         "forUserType": "moderator",
-        "endpoint": "/internal/menu/post-create"
-      },
-      {
-        "label": "Example form",
-        "description": "Show a simple form",
-        "location": "subreddit",
-        "forUserType": "moderator",
-        "endpoint": "/internal/menu/example-form"
+        "endpoint": "/internal/menu/create-poll"
       }
     ]
   },
   "forms": {
-    "exampleForm": "/internal/form/example-submit"
+    "pollForm": "/internal/form/poll-create"
   },
-  "triggers": {
-    "onAppInstall": "/internal/triggers/on-app-install"
+  "scheduler": {
+    "tasks": {
+      "poll-reveal": {
+        "endpoint": "/internal/scheduler/poll-reveal"
+      }
+    }
+  },
+  "permissions": {
+    "redis": true,
+    "reddit": true
   },
   "scripts": {
     "dev": "vite build --watch",
